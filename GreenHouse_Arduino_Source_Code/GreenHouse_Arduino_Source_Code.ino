@@ -3,6 +3,10 @@
 
 //Library inclusions
 #include <dht.h>
+#include <LiquidCrystal.h>
+
+//Initializing LCD Library
+LiquidCrystal lcd(10,9,5,4,3,2);
 
 //Global variables
 #define ledPin 12
@@ -15,6 +19,8 @@ dht DHT;
 
 void setup() 
 {
+  
+  lcd.begin(16,2); //Specify dimensions of lcd in begin()
   Serial.begin(9600);  // initialize serial communication at 9600 bits per second:
   pinMode(ledPin, OUTPUT);
   pinMode(relayPin, OUTPUT);
@@ -66,6 +72,9 @@ void readTemp(){
   Serial.println("%");    
   delay(500);
 
+  //Print both humidity and temperature on LCD
+  lcdDisplay_Temp_Hum();
+
   //Controlling the fan
   if(DHT.temperature > 28){
     digitalWrite(relayPin, HIGH);
@@ -75,4 +84,19 @@ void readTemp(){
     digitalWrite(relayPin, LOW);
     Serial.println("FAN OFF!!");
   }
+}
+
+//Displaying on the lcd
+void lcdDisplay_Temp_Hum(){
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Humidity: ");
+  lcd.print(DHT.humidity);//Print Humidity
+  lcd.print("%");
+  lcd.setCursor(0,1);
+  lcd.print("Temp: ");
+  lcd.print(DHT.temperature);//Print Temperature
+  lcd.setCursor(10,1);//Move to the position
+  lcd.print( (char)223);//the degree symbol
+  lcd.print("C");
 }
