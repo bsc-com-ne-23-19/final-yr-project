@@ -16,7 +16,7 @@ LiquidCrystal lcd(10,9,5,4,3,2);
 #define dhtPin A1
 #define DHTTYPE DHT11
 #define fanRelayPin 13
-#define heaterRelayPin 11
+#define heaterRelayPin 7
 
 //Global variables
 float temperature;
