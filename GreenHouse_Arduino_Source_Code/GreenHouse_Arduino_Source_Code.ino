@@ -17,6 +17,7 @@ LiquidCrystal lcd(10,9,5,4,3,2);
 #define DHTTYPE DHT11
 #define fanRelayPin 13
 #define heaterRelayPin 7
+#define moistureSensorPin A2
 
 //Global variables
 float temperature;
@@ -24,6 +25,7 @@ float humidity;
 int ldr_Value;
 int temp_min = 20;
 int temp_max = 30;
+float soil_moisture;
 
 //DHT variable
 DHT dht(dhtPin,DHTTYPE);
@@ -45,7 +47,8 @@ void loop()
   // read the input on analog pin 0:
   readLDR();
   readTemp();
-  delay(3000);
+  readMoisture();
+  delay(2000);
 }
 
 //LDR reading value and control LED
@@ -114,6 +117,17 @@ void lcdDisplay_Temp_Hum(){
   lcd.setCursor(10,1);//Move to the position
   lcd.print( (char)223);//the degree symbol
   lcd.print("C");
+  delay(1000);
+}
+
+//Displaying on the lcd
+void lcd_display_Moisture(){
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Moisture: ");
+  lcd.print(soil_moisture);//Print Humidity
+  lcd.print("%");
+  delay(1000);
 }
 
 //Faulty Sensor
@@ -150,6 +164,14 @@ void tempControl(){
       digitalWrite(fanRelayPin, LOW);
       Serial.println("FAN OFF!!");
     }
+}
+
+// Soil Moisture
+void readMoisture(){
+  int raw_soil_moisture = analogRead(moistureSensorPin);
+    // Prints Message on the LCD
+  soil_moisture = map(raw_soil_moisture,0,1023,0,100);
+  lcd_display_Moisture();
 }
 
 
