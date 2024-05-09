@@ -18,6 +18,7 @@ LiquidCrystal lcd(10,9,5,4,3,2);
 #define fanRelayPin 13
 #define heaterRelayPin 7
 #define moistureSensorPin A2
+#define waterPumpRelayPin 11
 
 //Global variables
 float temperature;
@@ -39,24 +40,29 @@ void setup()
   pinMode(ledPin, OUTPUT);
   pinMode(fanRelayPin, OUTPUT);
   pinMode(heaterRelayPin, OUTPUT);
+  pinMode(waterPumpRelayPin, OUTPUT);
   delay(1000);
 }
 
 void loop() 
 {
   // read the input on analog pin 0:
-  readLDR();
   readTemp();
   readMoisture();
+  readLDR();
   delay(2000);
 }
 
 //LDR reading value and control LED
 void readLDR(){
-  ldr_Value = analogRead(ldrPin);
+  int raw_ldr_Value = analogRead(ldrPin);
+  ldr_Value = map(raw_ldr_Value,0,1023,0,100);
   
-  if(ldr_Value < 500)
-  {
+  if((ldr_Value > 50) && (ldr_Value < 80)){
+    digitalWrite(ledPin,LOW);
+    Serial.println("LED OFF!!");
+  }
+  else if(ldr_Value < 50){
     digitalWrite(ledPin,HIGH);  // Turn ON LED
     Serial.println("LED ON!!!");
   }
@@ -65,6 +71,7 @@ void readLDR(){
     digitalWrite(ledPin,LOW);  // Turn OFF LED
     Serial.println("LED OFF!!!"); 
   }
+  lcd_display_Light();
   
 }
 
@@ -127,6 +134,15 @@ void lcd_display_Moisture(){
   lcd.print("Moisture: ");
   lcd.print(soil_moisture);//Print Humidity
   lcd.print("%");
+  // delay(1000);
+}
+
+//Displaying on the lcd
+void lcd_display_Light(){
+  lcd.setCursor(0,1);
+  lcd.print("Light: ");
+  lcd.print(ldr_Value);//Print Humidity
+  lcd.print("%");
   delay(1000);
 }
 
@@ -172,6 +188,29 @@ void readMoisture(){
     // Prints Message on the LCD
   soil_moisture = map(raw_soil_moisture,0,1023,0,100);
   lcd_display_Moisture();
+  controlMoisture();
+}
+
+// Water Control
+void controlMoisture(){
+  // Stop Watering
+  if(soil_moisture > 65){
+    digitalWrite(waterPumpRelayPin, LOW);
+    Serial.write("Pump OFF!!");
+  }
+
+  // Start Watering
+  else if(soil_moisture < 50){
+    digitalWrite(waterPumpRelayPin, HIGH);
+    Serial.write("Pump ON!!");
+  }
+
+  //Good level dont water 
+  else{
+    digitalWrite(waterPumpRelayPin, LOW);
+    Serial.write("Pump OFF!!");
+  }
+
 }
 
 
