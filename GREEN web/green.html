@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GROWGURDIAN GREENHOUSE</title>
+    <style>
+         html, body {
+            font-family: Times New Roman, Helvetica;
+            color: #228b22;
+            margin: 0;
+            padding: 0;
+            /* Set background image */
+            background-image: url('ggg.jpg');
+            background-size: cover; /* Cover the entire background */
+            background-repeat: no-repeat; /* Prevent image from repeating */
+            background-attachment: fixed; /* Fix the image while scrolling */
+              
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: rgba(143, 141, 141, 0.8); /* Add some transparency */
+            box-shadow: 0 0 20px rgba(238, 230, 230, 0.1);
+            border-radius: 8px;
+            margin-top: 20px;
+            overflow: hidden;
+        }
+
+        h1 {
+            text-align: center;
+            color: #228b22;
+            font-size: 3em;
+            margin-top: 0;
+            padding: 20px;
+          
+            border-radius: 8px 8px 0 0;
+        }
+
+        h2 {
+            text-align: center;
+            color: #333;
+            font-size: 1.5em;
+        }
+
+        .sensor-data, .actuator-control {
+            margin-bottom: 20px;
+        }
+
+        .sensor, .actuator {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 10px 0;
+            padding: 15px;
+            background-color: #e9ecef;
+            border-radius: 5px;
+        }
+
+        label {
+            font-weight: bold;
+            color: #555;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        .status, .mode {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .status span, .mode span {
+            margin-top: 10px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+
+        .mainheader {
+            width: 100vw;
+            background: linear-gradient(to right, #FFF,lightgreen);
+            position: sticky;
+            top: 0;
+            left: 0;
+            display: flex;
+            justify-content: space-between;
+            padding-left: 10px;
+    
+        }
+
+        /* Navigation menu styling */
+        ul {
+            display: flex;
+            padding: 10px 30px;
+            justify-content: flex-end; /* Aligns items to the end */
+            list-style: none;
+            position: relative;
+            cursor: pointer;
+            height: 50px;
+    
+            margin: 0; /* Removes default margin */
+            position: sticky; /* Ensures it stays fixed on scroll */
+            top: 0;
+            left: 0;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+        }
+
+        /* List items styling */
+        ul li {
+            padding: 10px 20px;
+            font-weight: bold;
+            font-size: 19px;
+            color: white; /* White text color for better readability */
+            margin: 0 10px; /* Adjust margin to space out items */
+        }
+        span{
+            color: rgb(80, 78, 76);
+        }
+        h2 {
+            color: #474945;
+        }
+        p{
+            color: #0a0e07;
+        }
+        h3{
+            color: #228b22;
+            font-size: xlarge;
+          font-style: inherit;
+            font-family: Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
+        }
+
+
+        
+    </style>
+</head>
+<body>
+    <div class="mainheader">
+        <h3>GCUBE</h3>
+            <ul>
+                <li><a href="#" onclick="showHome()">Home</a></li>
+                <li><a href="#" onclick="showAbout()">About</a></li>
+           </ul>
+     </div>
+    <div id="home" class="container">
+        <h1>GROWGURDIAN GREENHOUSE</h1>
+        <div class="sensor-data">
+            <h2>Sensor Readings</h2>
+            <div class="sensor">
+                <label>Humidity:</label>
+                <span id="humidity">0%</span>
+            </div>
+            <div class="sensor">
+                <label>Temperature:</label>
+                <span id="temperature">0°C</span>
+            </div>
+            <div class="sensor">
+                <label>Light Intensity:</label>
+                <span id="lightIntensity">0 lux</span>
+            </div>
+            <div class="sensor">
+                <label>Moisture:</label>
+                <span id="moisture">0%</span>
+            </div>
+        </div>
+        <div class="actuator-control">
+            <h2>Actuators</h2>
+            <div class="actuator">
+                <label>Fan  :</label>
+                <div class="status">
+                    <button onclick="toggleStatus('fan')">Status</button>
+                    <span id="fanStatus">OFF</span>
+                </div>
+                <div class="mode">
+                    <button onclick="toggleMode('fan')">Mode</button>
+                    <span id="fanMode">Manual</span>
+                </div>
+            </div>
+            <div class="actuator">
+                <label>Heater:</label>
+                <div class="status">
+                    <button onclick="toggleStatus('heater')">Status</button>
+                    <span id="heaterStatus">OFF</span>
+                </div>
+                <div class="mode">
+                    <button onclick="toggleMode('heater')">Mode</button>
+                    <span id="heaterMode">Manual</span>
+                </div>
+            </div>
+            <div class="actuator">
+                <label>Pump:</label>
+                <div class="status">
+                    <button onclick="toggleStatus('waterPump')">Status</button>
+                    <span id="waterPumpStatus">OFF</span>
+                </div>
+                <div class="mode">
+                    <button onclick="toggleMode('waterPump')">Mode</button>
+                    <span id="waterPumpMode">Manual</span>
+                </div>
+            </div>
+            <div class="actuator">
+                <label>Bulbs:</label>
+                <div class="status">
+                    <button onclick="toggleStatus('bulbs')">Status</button>
+                    <span id="bulbsStatus">OFF</span>
+                </div>
+                <div class="mode">
+                    <button onclick="toggleMode('bulbs')">Mode</button>
+                    <span id="bulbsMode">Manual</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="about" class="container" style="display: none;">
+        <h1>About Our System</h1>
+        <p>"The 'Grow Guardian Greenhouse' system is an environmental monitoring solution designed for greenhouse management. It enables real-time monitoring of crucial parameters such as humidity, temperature, light intensity, and moisture. Additionally, it offers control over various actuators including fans, heaters, water pumps, and bulbs. This comprehensive system ensures optimal growing conditions for plants within the greenhouse, promoting efficient and healthy growth."
+
+
+
+        </p>
+    </div>
+
+    <script src="greengurdian.js"></script>
+</body>
+</html>
