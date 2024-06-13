@@ -1,14 +1,17 @@
 //Library inclusions
+#include <ArduinoJson.h>  // Include the ArduinoJson library
 #include <SoftwareSerial.h>
 #include <DHT.h>
 #include <DHT_U.h>
 #include <LiquidCrystal.h>
+#include <String.h>
+#include <Ticker.h>
 
 //Initializing LCD Library
 LiquidCrystal lcd(10,9,5,4,3,2);
 
 //GSM using SofwareSerial...Initiating Serial connection on the digital pins
-SoftwareSerial GPRS(6,7);
+SoftwareSerial esp(6,8);
 
 //Global constants
 #define ledPin 12
@@ -21,47 +24,69 @@ SoftwareSerial GPRS(6,7);
 #define waterPumpRelayPin 11
 
 //Global variables
+// Ticker timer;
+String gsm_read_string = "";
+String alert_message = "";
 float temperature;
 float humidity;
+float light;
+float moisture;
+float temperature_threshold;
+float humidity_threshold;
+float light_threshold;
+float moisture_threshold;
 int ldr_Value;
-int temp_min = 20;
-int temp_max = 30;
-float soil_moisture;
+float temp_min;
+float temp_max;
+float temp_low_critical = temp_min - (temp_min * 0.25);
+float temp_high_critical = temp_max + (temp_max * 0.25);
+float hum_min;
+float hum_max;
+float light_min;
+float light_max;
+float light_low_critical = light_min - (light_min * 0.25);
+float light_high_critical = light_max + (light_max * 0.25);
+float moisture_min;
+float moisture_max;
+float moisture_low_critical = moisture_min - (moisture_min * 0.25);
+float moisture_high_critical = moisture_max + (moisture_max * 0.25);
+int dry_raw_moisture = 1023;
+int wet_raw_moisture = 635;
+
+int raw_no_light = 0;
+// int raw_yes_light = 210;
+int raw_yes_light = 1023;
+
+// false = off
+boolean fan_state_manual = false;
+boolean heater_state_manual = false;
+boolean pump_state_manual = false;
+boolean light_state_manual = false;
+
+// false means it is manual
+boolean fan_mode = false;
+boolean heater_mode = false;
+boolean pump_mode = false;
+boolean light_mode = false;
 
 //DHT variable
 DHT dht(dhtPin,DHTTYPE);
 
 void setup() 
 {
-  GPRS.begin(9600); // Set baud rate since it's a serial connection
-  lcd.begin(16,2); //Specify dimensions of lcd in begin()
+  esp.begin(9600); // Set baud rate since it's a serial connection
+  // lcd.begin(16,2); //Specify dimensions of lcd in begin()
   Serial.begin(9600);  // initialize serial communication at 9600 bits per second:
-  dht.begin();
+  dht.begin();  
   pinMode(ledPin, OUTPUT);
   pinMode(fanRelayPin, OUTPUT);
   pinMode(heaterRelayPin, OUTPUT);
   pinMode(waterPumpRelayPin, OUTPUT);
-
-
-  // Delete messages on the sim card on the gsm
-  for (int i = 1; i <= 15; i++) {
-    Serial.print("AT+CMGD=");
-    Serial.println(i);
-    delay(200);
-
-    // Not really necessary but prevents the serial monitor from dropping any input
-    // while(GPRS.available()) 
-      // Serial.write(GPRS.read());
-  }
-
-  // Set GSM in receiving mode
-  receive_message();
-
-  // 
-  lcd.clear();
-  lcd.println("Finished Startup");
-  delay(1000);
 }
+
+
+
+/************************************Loop Section*******************************/
 
 void loop() 
 {
@@ -70,13 +95,13 @@ void loop()
   readTemp();
   readMoisture();
   readLDR();
+  actuatorToJSON();
+  sensorDataToJSON();
+  read_from_esp();
 
   // Manual prompts
-  read_from_gsm();
-  // Check from the arduino side if the gsm has data to give it by reading the data byte by byte
-  
-
-  delay(2000);
+  // read_from_gsm();
+  // Check from the arduino side if the gsm has data to give it by reading the data byte by byte  
 }
 
 /********************************SENSOR READING SECTION******************************/
@@ -91,16 +116,24 @@ void readTemp(){
   // Check if readings are valid(Working sensors)
 
   if (isnan(temperature) || isnan(humidity)) {
-    lcd_display_invalid_dht();
+    // lcd_display_invalid_dht();
+    Serial.println("Null Reading");
+    temperature = 0;
+    humidity = 0;
   }
  
   else{
 
     //Print both humidity and temperature on LCD
-    lcd_display_temp_hum();
+    // lcd_display_temp_hum();
 
     //Activate or Deactivate Actuators
-    // temp_control();
+    temp_control();
+    Serial.print("Temperature: ");
+    Serial.println(temperature);
+    Serial.print("Humidity: ");
+    Serial.println(humidity);
+    delay(5000);
 
   }
 }
@@ -108,25 +141,41 @@ void readTemp(){
 //LDR reading value and control LED
 void readLDR(){
   int raw_ldr_Value = analogRead(ldrPin);
-  ldr_Value = map(raw_ldr_Value,0,1023,0,100);
-  lcd_display_light();
-  // light_control();  
+  light = map(raw_ldr_Value,raw_no_light,raw_yes_light,0,100);
+  Serial.println(String("Light: ") + light + String("%"));
+  delay(5000);
+  // lcd_display_light();
+
+  // Control Light
+  
+  light_control();
+  
+     
 }
 
 // Soil Moisture
 void readMoisture(){
-  int raw_soil_moisture = analogRead(moistureSensorPin);
+  int raw_moisture = analogRead(moistureSensorPin);
     // Prints Message on the LCD
-  soil_moisture = map(raw_soil_moisture,0,1023,0,100);
-  lcd_display_moisture();
-  // controlMoisture();
+  moisture = map(raw_moisture,dry_raw_moisture,wet_raw_moisture,0,100);
+  // moisture = 100 - moisture;
+
+  // Monitor
+  Serial.print("Moisture: ");
+  Serial.print(moisture);
+  Serial.println("%");
+  delay(5000);
+  // lcd_display_moisture();
+
+  // Control moisture  
+  control_moisture();  
 }
 
 
 /******************************************END OF SENSOR READING SECTION*********************************************/
 
 
-/***********************************CONTROL SECTION********************************************/
+/************************************************CONTROL SECTION****************************************************/
 
 // Controlling heater and fan using temperature
 void temp_control(){
@@ -134,60 +183,330 @@ void temp_control(){
 
     // Right Range-----Switch fan and heater OFF
     if((temperature > temp_min) && (temperature < temp_max)){
-      fan_off();
-      heater_off();
+
+      // Alert for normal temperature
+      send_normal_alert_temp();
+
+      // check if fan is manual
+      if(fan_state_manual == true){
+
+        // Print fan is in manual mode
+        lcd.clear();
+        lcd.println("Fan Manual");
+        delay(300);
+
+        // check if heater is manual
+        if(heater_state_manual == true){
+          lcd.clear();
+          lcd.print("Heater Manual");
+          delay(300);
+        }
+
+        //if it is auto
+        else{
+          heater_off();
+        }
+      }
+
+      // Fan is auto
+      else if(fan_state_manual == false){
+
+        if(heater_state_manual == true){
+          lcd.clear();
+          lcd.print("Heater Manual");
+          delay(300);
+        }
+
+        //if it is auto
+        else{
+          heater_off();
+        }
+
+        fan_off();
+      }
+
+      
+      // check if heater is manual
+      else if(heater_state_manual == true){
+
+        // Print status of heater
+        lcd.clear();
+        lcd.println("Heater Manual");
+        // check if fan is manual
+        if(fan_state_manual == true){
+          lcd.clear();
+          lcd.println("Fan Manual");
+          delay(300);
+        }
+
+        //if it is auto
+        else{
+          fan_off();
+        }
+      }
+
+      // Heater is auto
+      else{
+
+        if(fan_state_manual == true){
+          lcd.clear();
+          lcd.print("Fan Manual");
+          delay(300);
+        }
+
+        //if it is auto
+        else{
+          fan_off();
+        }
+        
+        heater_off();
+      }
+      
+    }
+
+    // For a critical alert
+    else if(temperature <= temp_low_critical){
+      send_low_critical_alert_temp();
+    }
+
+    else if(temperature >= temp_high_critical){
+      send_high_critical_alert_temp();
     }
     
     // Temperature is high
     else if(temperature > temp_max){
-      fan_on();
-      // Find out if heater is on or off, then act appropriately
-      heater_off();
+
+      // Alert HIGH
+      send_high_alert_temp();
+
+      // check if fan is manual
+      if(fan_state_manual == true){
+
+        // Print fan is in manual mode
+        lcd.clear();
+        lcd.println("Fan Manual");
+        delay(300);
+
+        // check if heater is manual
+        if(heater_state_manual == true){
+          lcd.clear();
+          lcd.print("Heater Manual");
+          delay(300);
+        }
+
+        //if it is auto
+        else{
+          heater_off();
+        }
+      }
+
+      // Fan is auto
+      else{
+
+        if(heater_state_manual == true){
+          lcd.clear();
+          lcd.print("Heater Manual");
+          delay(300);
+        }
+
+        //if it is auto
+        else{
+          heater_off();
+        }
+
+        fan_on();
+      }
+
     }
 
     // Temperature is Low
     else{
-      heater_on();
-      fan_off();
+
+      // Alert LOW
+      send_low_alert_temp();
+
+      // check if heater is manual
+      if(heater_state_manual == true){
+
+        // Print status of heater
+        lcd.clear();
+        lcd.println("Heater Manual");
+
+        // check if fan is manual
+        if(fan_state_manual == true){
+          lcd.clear();
+          lcd.println("Fan Manual");
+          delay(300);
+        }
+
+        //fan auto
+        else{
+          fan_off();
+        }
+      }
+
+      // Heater is auto
+      else{
+
+        // fan manual
+        if(fan_state_manual == true){
+          lcd.clear();
+          lcd.print("Fan Manual");
+          delay(300);
+        }
+
+        //fan auto
+        else{
+          fan_off();
+        }
+        
+        heater_on();
+      }
+      
     }
 }
+
 
 // Light Control
 void light_control(){
   
-  if((ldr_Value > 50) && (ldr_Value < 80)){
-    light_off();
-  }
-  else if(ldr_Value < 50){
-    light_on();
+  // Normal Light
+  if((ldr_Value > light_min) && (ldr_Value < light_max)){
+
+    // Alert Normal
+    send_normal_alert_light();
+
+    // Light is in Manual mode
+    if(light_state_manual == true){
+      lcd.clear();
+      lcd.print("Light Manual");
+      delay(300);
+    }
+    
+    // Light in Auto mode
+    else{
+      light_off();
+    }
+    
   }
 
+  // For a critical alert
+  else if(light <= light_low_critical){
+    send_low_critical_alert_light();
+  }
+
+  // Low Light
+  else if(ldr_Value < light_min){
+
+    // Alert Low
+    send_low_alert_light();
+
+    // Light is in Manual mode
+    if(light_state_manual == true){
+      lcd.clear();
+      lcd.print("Light Manual");
+      delay(300);
+    }
+    
+    // Light in Auto mode
+    else{
+      light_on();
+    }
+  }
+
+  // High Light
   else{
-    light_off(); 
+
+    // Alert High
+    send_high_alert_light();
+
+    // Light is in Manual mode
+    if(light_state_manual == true){
+      lcd.clear();
+      lcd.print("Light Manual");
+      delay(300);
+    }
+    
+    // Light in Auto mode
+    else{
+      light_off();
+    }
   }
 }
 
 // Water Control
-void controlMoisture(){
+void control_moisture(){
+
   // Stop Watering
-  if(soil_moisture > 65){
-    pump_off();
+  if(moisture > moisture_max){
+
+    // Alert High
+    send_high_alert_moisture();
+
+    // Pump in manual
+    if(pump_state_manual == true){
+      lcd.clear();
+      lcd.print("Pump Manual");
+      delay(300);
+    }
+
+    // Pump in Auto
+    else{
+      pump_off();
+    }
+    
+  }
+
+  // For a critical alert
+  else if(moisture <= moisture_low_critical){
+    send_low_critical_alert_moisture();
+  }
+
+  else if(moisture >= moisture_high_critical){
+    send_high_critical_alert_moisture();
   }
 
   // Start Watering
-  else if(soil_moisture < 50){
-    pump_on();
+  else if(moisture < moisture_min){
+
+    // Alert Low
+    send_low_alert_moisture();
+
+    // Pump in manual
+    if(pump_state_manual == true){
+      lcd.clear();
+      lcd.print("Pump Manual");
+      delay(300);
+    }
+
+    // Pump in Auto
+    else{
+      pump_on();
+    }
   }
 
   //Good level dont water 
   else{
-   pump_off();
+
+    // Alert Normal
+    send_normal_alert_moisture();
+
+    // Pump in manual
+    if(pump_state_manual == true){
+      lcd.clear();
+      lcd.print("Pump Manual");
+      delay(300);
+    }
+
+    // Pump in Auto
+    else{
+      pump_off();
+    }
   }
 
 }
 
 /*************************************END OF CONTROL SECTION*******************************************/
-
 
 /**************************************ACTUATOR SECTION************************************************/
 
@@ -250,6 +569,110 @@ void light_off(){
 /*******************************END OF ACTUATOR SECTION***********************************************/
 
 
+/********************************************Sending Alerts*******************************************/
+
+// Normal Temperature
+void send_normal_alert_temp(){
+  alert_message = "Temperature is Normal";
+  send_message(alert_message);
+}
+
+// High Temperature
+void send_high_alert_temp(){
+  alert_message = "Temperature is High";
+  send_message(alert_message);
+}
+
+// Low Temperature
+void send_low_alert_temp(){
+  alert_message = "Temperature is Low";
+  send_message(alert_message);
+}
+
+// Critical Temperature
+void send_high_critical_alert_temp(){
+  alert_message = "Temperature is critical. Check the fan";
+  send_message(alert_message);
+}
+
+void send_low_critical_alert_temp(){
+  alert_message = "Temperature is critical. Check the heater.";
+  send_message(alert_message);
+}
+
+// High Humidity
+void send_high_alert_hum(){
+  alert_message = "Humidity is High";
+  send_message(alert_message);
+}
+
+// Low Humidity
+void send_low_alert_hum(){
+  alert_message = "Humidity is Low";
+  send_message(alert_message);
+}
+
+// Normal Humidity
+void send_normal_alert_hum(){
+  alert_message = "Humidity is Normal";
+  send_message(alert_message);
+}
+
+// Low Light
+void send_low_alert_light(){
+  alert_message = "Light is Low";
+  send_message(alert_message);
+}
+
+void send_low_critical_alert_light(){
+  alert_message = "Light is critical. Check the light source.";
+  send_message(alert_message);
+}
+
+// High Light
+void send_high_alert_light(){
+  alert_message = "Light is High";
+  send_message(alert_message);
+}
+
+// Normal Light
+void send_normal_alert_light(){
+  alert_message = "Light is Normal";
+  send_message(alert_message);
+}
+
+// Low Moisture
+void send_low_alert_moisture(){
+  alert_message = "Moisture is Low";
+  send_message(alert_message);
+}
+
+// High Moisture
+void send_high_alert_moisture(){
+  alert_message = "Moisture is High";
+  send_message(alert_message);
+}
+
+// Normal Moisture
+void send_normal_alert_moisture(){
+  alert_message = "Moisture is Normal";
+  send_message(alert_message);
+}
+
+// Critical Temperature
+void send_high_critical_alert_moisture(){
+  alert_message = "Moisture is critical. Check the pump";
+  send_message(alert_message);
+}
+
+void send_low_critical_alert_moisture(){
+  alert_message = "Moisture is critical. Check the pump.";
+  send_message(alert_message);
+}
+
+/*********************************************END OF ALERT SECTION*****************************************/
+
+
 /*************************************************LCD SECTION*******************************************************/
 
 //Temperature and Humidity Readings
@@ -265,7 +688,7 @@ void lcd_display_temp_hum(){
   lcd.setCursor(10,1);//Move to the position
   lcd.print( (char)223);//the degree symbol
   lcd.print("C");
-  delay(100);
+  delay(300);
 }
 
 //Moisture Readings
@@ -273,9 +696,9 @@ void lcd_display_moisture(){
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("Moisture: ");
-  lcd.print(soil_moisture);//Print Humidity
+  lcd.print(moisture);//Print Humidity
   lcd.print("%");
-  delay(100);
+  delay(300);
 }
 
 //Light Readings
@@ -284,7 +707,7 @@ void lcd_display_light(){
   lcd.print("Light: ");
   lcd.print(ldr_Value);//Print Humidity
   lcd.print("%");
-  delay(100);
+  delay(300);
 }
 
 //Faulty Sensor Message
@@ -292,57 +715,56 @@ void lcd_display_invalid_dht(){
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("Faulty DHT Sensor");
-  delay(100);
+  delay(300);
 }
 
 //Fan On Message
 void lcd_display_fan_on(){
   lcd.clear();
   lcd.print("Fan On");
-  delay(100);
+  delay(300);
 }
 
 //Fan Off Message
 void lcd_display_fan_off(){
   lcd.clear();
   lcd.print("Fan Off");
-  delay(100);
+  delay(300);
 }
 
 //Heater On Message
 void lcd_display_heater_on(){
   lcd.clear();
   lcd.print("Heater On");
-  delay(100);
+  delay(300);
 }
 
 //Heater Off Message
 void lcd_display_heater_off(){
   lcd.clear();
   lcd.print("Heater Off");
-  delay(100);
-
+  delay(300);
 }
 
 //Pump On Message
 void lcd_display_pump_on(){
   lcd.clear();
   lcd.print("Pump On");
-  delay(100);
+  delay(300);
 }
 
 //Pump Off Message
 void lcd_display_pump_off(){
   lcd.clear();
   lcd.print("Pump Off");
-  delay(100);
+  delay(300);
 }
 
 //Light On Message
 void lcd_display_light_on(){
   lcd.clear();
   lcd.print("Light On");
-  delay(100);
+  delay(300);
 
 }
 
@@ -350,137 +772,265 @@ void lcd_display_light_on(){
 void lcd_display_light_off(){
   lcd.clear();
   lcd.print("Light Off");
-  delay(100);
+  delay(300);
 }
 
 
 /**********************************END OF LCD SECTION******************************************/
 
-
-/**********************************COMMUNICATION SECTION***************************************/
-/*The first part is for the user controlling actuators or sending commands to the arduino for whatever task*/
-
-String gsm_read_string = "";
-void receive_message(){
-  Serial.println("AT+CMGF=1");
-  Serial.println("AT+CNMI=2,2,0,0,0");
-  delay(1000);
+/*****************************************Communication ESP8266 WiFi************************************/
+String incomingData = "";
+void read_from_esp(){ 
+  if (esp.available() > 0) {
+      incomingData = esp.readStringUntil('\n');
+      Serial.println(incomingData);
+    }
+    parse_command(incomingData);
+    delay(100);
 }
 
-void read_from_gsm(){
-  // If there is something to be read, read it.
-  while (Serial.available() > 0)
-      {
-        // Read the whole string from gsm
-        gsm_read_string= Serial.readString();
+void parse_command(String command){
 
-        // The string will have a carriage return character at the end as a delimeter, remove it.
-        gsm_read_string.remove(gsm_read_string.length()-1);
 
-        // Analyse the message
+    if (true) {
+      Serial.println("Received event:");
+      Serial.println(command);
 
-        // Turn fan on
-        if(gsm_read_string == "FAN_ON")
-        {
-          fan_on();
-        }
-
-        // Turn fan off
-        else if(gsm_read_string == "FAN_OFF")
-        {
-          fan_off();
-        }
-
-        // Turn heater on
-        else if(gsm_read_string == "HEATER_ON")
-        {
-          heater_on();
-        }
-
-        // Turn heater off
-        else if(gsm_read_string == "HEATER_OFF")
-        {
-          heater_off();
-        }
-
-        // Turn Pump on
-        else if(gsm_read_string == "PUMP_ON")
-        {
-          pump_on();
-        }
-
-        // Turn Pump off
-        else if(gsm_read_string == "PUMP_OFF")
-        {
-          pump_off();
-        }
-
-        // Turn Light on
-        else if(gsm_read_string == "LIGHT_ON")
-        {
-          light_on();
-        }
-
-        // Turn Light off
-        else if(gsm_read_string == "LIGHT_OFF")
-        {
-          light_off();
-        }
-
-        else
-        {
-          lcd.clear();
-          lcd.print("WRONG COMMAND");
-          delay(100);
-          // digitalWrite(buzzer, HIGH); 
-          // delay(500);
-          // digitalWrite(buzzer, LOW); 
-          delay(100);
-        }
+              // Parse the JSON data using ArduinoJson
+      DynamicJsonDocument doc(1024); // Adjust buffer size as needed
+      DeserializationError error = deserializeJson(doc, command);
+    
+      if (error) {
+        Serial.print("Failed to parse JSON: ");
+        Serial.println(error.f_str());
       }
+
+      else {     
+        if (doc.containsKey("fan")) {
+              // Key exists, access its value
+          String command = doc["fan"];
+          // Act based on the command
+          if (command.equals("on")){
+            fan_on();             
+          }
+
+          else if (command.equals("auto")){
+            fan_mode = true;
+          }
+
+          else if (command.equals("manual")){
+            fan_mode = false;
+          }
+
+          else if (command.equals("off")){
+            fan_off();
+          }
+
+          else{
+            Serial.println("Invalid command.");
+          }
+                
+        }
+
+          else if (doc.containsKey("heater"))
+          {
+                
+            String command = doc["heater"];
+            if (command.equals("on")){
+              heater_on();
+            }
+
+            else if (command.equals("auto")){
+            heater_mode = true;
+            }
+
+            else if (command.equals("manual")){
+              heater_mode = false;
+            }
+
+            else if (command.equals("off")){
+              heater_off();
+            }
+
+            else{
+              Serial.println("Invalid command.");
+            }
+          }
+
+          else if (doc.containsKey("pump"))
+          {
+                
+            String command = doc["pump"];
+            if (command.equals("on")){
+              pump_on();
+            }
+
+            else if (command.equals("auto")){
+              pump_mode = true;
+            }
+
+            else if (command.equals("manual")){
+              pump_mode = false;
+            }
+
+            else if (command.equals("off")){
+              pump_off();
+            }
+
+            else{
+              Serial.println("Invalid command.");
+            }
+          }
+
+
+          else if (doc.containsKey("light"))
+          {
+                
+            String command = doc["light"];
+            if (command.equals("on")){
+              light_on();
+            }
+
+            else if (command.equals("auto")){
+              light_mode = true;
+            }
+
+            else if (command.equals("manual")){
+              light_mode = false;
+            }
+
+            else if (command.equals("off")){
+              light_off();
+            }
+
+            else{
+              Serial.println("Invalid command.");
+            }
+          }
+
+          // Set threshold values
+          else if (doc.containsKey("temperature_threshold")) {
+            // Change value to integer
+            temperature_threshold = doc["temperature_threshold"].as<float>();
+            humidity_threshold = doc["humidity_threshold"].as<float>();
+            moisture_threshold = doc["moisture_threshold"].as<float>();
+            light_threshold = doc["light_threshold"].as<float>();
+            Serial.println("temp_T" + String(temperature_threshold));
+            Serial.println("hum_T" + String(humidity_threshold));
+            Serial.println("moisture_T" + String(moisture_threshold));
+            Serial.println("light_T" + String(light_threshold));
+          }        
+
+          else 
+          {
+            Serial.println("Invalid command.");    
+          }
+      }
+    }  
 }
 
-/*
 
-This Code Block begins gsm communication. Needs more research and building.
+              
+/*******************************************Convert to JSON***********************************/
+void sensorDataToJSON(){
+  DynamicJsonDocument doc(512);
+  // Add sensor data to the document
+  doc["type"] = "sensor_data";
+  doc["temperature"] = temperature;
+  doc["humidity"] = humidity;
+  doc["light"] = light;
+  doc["moisture"] = moisture;
+  // Serialize the JSON document into a string
+  String jsonString;
+  serializeJson(doc, jsonString);
 
+  esp.println(jsonString);
+}
 
-void gsm_communication(){
-  // Check if there is anything from the Serial, and initiate gsm
-  if(Serial.available() > 0){
-      switch(Serial.read()){
-        case 's' :
-          SendMessage();
-          break;
+void actuatorToJSON(){
+  DynamicJsonDocument doc(512);
+  // Add sensor data to the document
+  doc["type"] = "actuator_data";
 
-        case 'r' : 
-          ReceiveMessage();
-          break;
-      }
+  if(fan_state_manual == true){
+    doc["fan_state"] = "on";
   }
 
-  // Check if there is any data from the gsm and write it to the serial
-  if(gsm.available() > 0){
-    Serial.write(gsm.read());
+  if(fan_state_manual == false){
+    doc["fan_state"] = "off";
   }
+
+  if(fan_mode == true){
+    doc["fan_mode"] = "auto";
+  }
+
+  if(fan_mode == false){
+    doc["fan_mode"] = "manual";    
+  }
+
+  if(heater_state_manual == true){
+    doc["heater_state"] = "on";  
+  }
+
+  if(heater_state_manual == false){
+    doc["heater_state"] = "off";
+  }
+
+  if(heater_mode == true){
+    doc["heater_mode"] = "auto";
+  }
+
+  if(heater_mode == false){
+    doc["heater_mode"] = "manual";
+  }
+
+  if(pump_state_manual == true){
+    doc["pump_state"] = "on";
+  }
+
+  if(pump_state_manual == false){
+    doc["pump_state"] = "off";
+  }
+
+  if(pump_mode == true){
+    doc["pump_mode"] = "auto";
+  }
+
+  if(pump_mode == false){
+    doc["pump_mode"] = "manual";
+  }
+
+  if(light_state_manual == true){
+    doc["light_state"] = "on";
+  }
+
+  if(light_state_manual == false){
+    doc["light_state"] = "off";
+  }
+
+  if(light_mode == true){
+    doc["light_mode"] = "auto";
+  }
+
+  if(light_mode == false){
+    doc["light_mode"] = "manual";
+  }
+
+  // Serialize the JSON document into a string
+  String jsonString;
+  serializeJson(doc, jsonString);
+
+  esp.println(jsonString);
 }
 
-void SendMessage(){
-  //Set gsm module in Send SMS mode -- I want to send SMS
-  gsm.println("AT+CMGF=1");
-  delay(1000);
-  // Punch in phone number -- To Who?
-  gsm.println("AT+CMGS=\"+265\"\r");
-  delay(1000);
-  //Write the text
-  gsm.println("Learning happens in iterations.");
-  delay(100);
-  //Exit
-  gsm.println((char) 26);
-}
+void send_message(String msg){
+  DynamicJsonDocument doc(512);
+  // Add sensor data to the document
+  doc["type"] = "notification_data";
+  doc["msg"] = msg;
+  // Serialize the JSON document into a string
+  String jsonString;
+  serializeJson(doc, jsonString);
 
-void RecieveMessage(){
-  gsm.println("AT+CNMI=2,2,0,0,0");
-  delay(1000);
+  esp.println(jsonString);
 }
-*/
